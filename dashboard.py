@@ -11,25 +11,35 @@ st.title("📈 브랜드 트렌드 vs 잉글우드랩(950140) 주가 상관관�
 try:
     # 1. 틱톡 데이터 로드
     df = pd.read_csv("tiktok_trends_master.csv")
-    df['Date'] = pd.to_datetime(df['Date'])
+    df['Date'] = pd.to_datetime(df['Date']).dt.date # 시간 제외 날짜만 추출
 
-    # 2. 잉글우드랩 주가 데이터 로드 (yfinance)
-    # 틱톡 데이터의 시작일부터 오늘까지의 주가를 가져옵니다.
+    # 2. 잉글우드랩 주가 데이터 로드
     start_date = df['Date'].min().strftime('%Y-%m-%d')
     stock_df = yf.download("950140.KQ", start=start_date)
+    
+    # 💡 [중요] 멀티 인덱스 컬럼 해결 (에러 원인 제거)
+    if isinstance(stock_df.columns, pd.MultiIndex):
+        stock_df.columns = stock_df.columns.get_level_values(0)
+    
     stock_df = stock_df.reset_index()
-    stock_df['Date'] = pd.to_datetime(stock_df['Date'])
+    stock_df['Date'] = pd.to_datetime(stock_df['Date']).dt.date # 시간 제외 날짜만 추출
 
     # 3. 데이터 통합 (날짜 기준)
     merged_df = pd.merge(df, stock_df[['Date', 'Close']], on='Date', how='left')
+    
+    # 주말 등 주가 없는 날은 직전 주가로 채우기 (분석 연속성 확보)
+    merged_df['Close'] = merged_df['Close'].ffill()
+
+    # 지표 계산
     merged_df['Comment_Ratio'] = (merged_df['Avg_Comments'] / merged_df['Avg_Views'] * 100).fillna(0)
+    merged_df['Like_Ratio'] = (merged_df['Avg_Likes'] / merged_df['Avg_Views'] * 100).fillna(0)
 
     # 최신 데이터 추출
     last_row = merged_df.iloc[-1]
     current_price = last_row['Close'] if not pd.isna(last_row['Close']) else "데이터 없음"
 
     # --- 상단 핵심 지표 ---
-    st.info(f"💡 잉글우드랩 현재가: {current_price}원 (종가 기준)")
+    st.info(f"💡 잉글우드랩 현재가: {current_price:,.0f}원 (종가 기준)")
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("종합 Score", f"{last_row['Score']:,}")
     m2.metric("댓글 참여율", f"{last_row['Comment_Ratio']:.2f}%")
@@ -61,20 +71,19 @@ try:
     st.plotly_chart(fig_combined, use_container_width=True)
 
     # --- 세부 지표 섹션 ---
-    st.subheader("💬 세부 참여 지표 추이")
+    st.subheader("💬 소비자 반응 및 몰입도 분석")
     c1, c2, c3 = st.columns(3)
     
     with c1:
         st.write("**댓글 참여율 (%)**")
-        st.plotly_chart(px.line(merged_df, x='Date', y='Comment_Ratio', markers=True), use_container_width=True)
+        st.plotly_chart(px.line(merged_df, x='Date', y='Comment_Ratio', markers=True, color_discrete_sequence=['#AB63FA']), use_container_width=True)
     with c2:
         st.write("**평균 공유수**")
         st.plotly_chart(px.bar(merged_df, x='Date', y='Avg_Shares', color_discrete_sequence=['#FFA15A']), use_container_width=True)
     with c3:
         st.write("**조회수 대비 좋아요 비율 (%)**")
-        merged_df['Like_Ratio'] = (merged_df['Avg_Likes'] / merged_df['Avg_Views'] * 100).fillna(0)
         st.plotly_chart(px.line(merged_df, x='Date', y='Like_Ratio', markers=True, color_discrete_sequence=['#FECB52']), use_container_width=True)
 
 except Exception as e:
-    st.warning("데이터 수집 및 통합 중입니다. 첫 데이터가 생성되면 주가와 함께 표시됩니다.")
+    st.warning("데이터 수집 및 통합 중입니다.")
     st.error(f"상세 에러: {e}")
