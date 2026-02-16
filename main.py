@@ -1,87 +1,86 @@
-import requests
+import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
-import time
-import os
+import plotly.express as px
 
-# 설정 정보
-API_TOKEN = "apify_api_C2b8c0NEP4XXOVzqF7KTnaY7OMXYx926RYYD"
-ACTOR_ID = "GdWCkxBtKWOsKjdch" 
+st.set_page_config(page_title="Good Molecules x 잉글우드랩 정밀 분석", layout="wide")
+st.title("🧪 브랜드 인기도 & 투자 선행 지표 정밀 대시보드")
 
-def run_and_get_report(keyword):
-    print(f"🚀 [{keyword}] 정밀 데이터 수집 시작...")
-    run_url = f"https://api.apify.com/v2/acts/{ACTOR_ID}/runs?token={API_TOKEN}"
-    
-    # 충분한 샘플 확보를 위해 100개 요청 (이 중 24시간 이내 것만 골라냄)
-    payload = {
-        "searchQueries": [keyword],
-        "resultsPerPage": 100,           
-        "searchType": "video",
-        "searchDateFilter": "past-24h",
-        "searchSort": "latest"
-    }
-    
-    response = requests.post(run_url, json=payload)
-    run_res = response.json()
-    dataset_id = run_res["data"]["defaultDatasetId"]
-    
-    print(f"✅ 실행 성공! 정밀 필터링을 위해 60초 대기...")
-    time.sleep(60) 
-    
-    items_url = f"https://api.apify.com/v2/datasets/{dataset_id}/items?token={API_TOKEN}"
-    items = requests.get(items_url).json()
-    
-    if not items: 
-        print("ℹ️ 수집된 데이터가 없습니다.")
-        return None
+try:
+    # 데이터 로드
+    df = pd.read_csv("tiktok_trends_master.csv")
+    df['Date'] = pd.to_datetime(df['Date'])
 
-    df = pd.DataFrame(items)
-    
-    # --- 24시간 이내 신규 영상 '진짜' 개수 계산 ---
-    now_ts = time.time()
-    one_day_ago_ts = now_ts - (24 * 60 * 60)
-    
-    # createTime(유닉스 타임스탬프) 기준 필터링
-    if 'createTime' in df.columns:
-        real_new_videos = df[df['createTime'] >= one_day_ago_ts]
-        new_clips_count = len(real_new_videos)
-    else:
-        # 필드가 없을 경우 기존 방식 유지
-        new_clips_count = len(df)
+    # 주요 계산 지표 추가
+    df['Like_Ratio'] = (df['Avg_Likes'] / df['Avg_Views'] * 100).fillna(0)     # 조회수 대비 좋아요 비율
+    df['Comment_Ratio'] = (df['Avg_Comments'] / df['Avg_Views'] * 100).fillna(0) # 조회수 대비 댓글 비율
 
-    # --- 지표 계산 (상위 50개 샘플 기반) ---
-    analysis_df = df.head(50)
-    plays = analysis_df['playCount'].mean() if 'playCount' in analysis_df.columns else 0
-    likes = analysis_df['diggCount'].mean() if 'diggCount' in analysis_df.columns else 0
-    comments = analysis_df['commentCount'].mean() if 'commentCount' in analysis_df.columns else 0
-    shares = analysis_df['shareCount'].mean() if 'shareCount' in analysis_df.columns else 0
+    # 최신 데이터 추출
+    last_row = df.iloc[-1]
+    prev_row = df.iloc[-2] if len(df) > 1 else last_row
 
-    report_data = {
-        "Date": datetime.now().strftime("%Y-%m-%d"),
-        "Keyword": keyword,
-        "Score": round((plays * 0.01) + (likes * 0.5) + (comments * 2), 2),
-        "Avg_Views": int(plays),
-        "Avg_Likes": int(likes),
-        "Avg_Comments": int(comments),
-        "Avg_Shares": int(shares),
-        "New_Clips": new_clips_count  # 진짜 24시간 내 개수
-    }
-    
-    # 💾 CSV 저장
-    file_name = "tiktok_trends_master.csv"
-    df_new = pd.DataFrame([report_data])
-    
-    if not os.path.exists(file_name):
-        df_new.to_csv(file_name, index=False, encoding='utf-8-sig')
-    else:
-        df_old = pd.read_csv(file_name)
-        if str(report_data["Date"]) not in df_old["Date"].astype(str).values:
-            df_combined = pd.concat([df_old, df_new], ignore_index=True)
-            df_combined.to_csv(file_name, index=False, encoding='utf-8-sig')
-            print(f"✅ {report_data['Date']} 데이터 업데이트 완료 (신규: {new_clips_count}개)")
-        else:
-            print(f"ℹ️ {report_data['Date']} 데이터가 이미 존재합니다.")
-            
-    return report_data
+    # --- 상단 핵심 지표 (Metrics) ---
+    st.subheader("📍 오늘의 핵심 지표")
+    m1, m2, m3, m4, m5 = st.columns(5)
+    m1.metric("종합 Score", f"{last_row['Score']:,}", f"{round(last_row['Score'] - prev_row['Score'], 2)}")
+    m2.metric("신규 영상(24h)", f"{int(last_row['New_Clips'])}개", f"{int(last_row['New_Clips'] - prev_row['New_Clips'])}")
+    m3.metric("평균 조회수", f"{int(last_row['Avg_Views']):,}")
+    m4.metric("좋아요 참여율", f"{last_row['Like_Ratio']:.2f}%")
+    m5.metric("댓글 참여율", f"{last_row['Comment_Ratio']:.2f}%")
 
-run_and_get_report("goodmolecules")
+    st.divider()
+
+    # --- 그래프 섹션 1: 확산성 및 화력 (Score, 조회수, 신규 영상) ---
+    st.subheader("🚀 1. 브랜드 확산 및 인지도 지표")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.write("**종합 화력 (Score)**")
+        fig1 = px.area(df, x='Date', y='Score', color_discrete_sequence=['#FF4B4B'])
+        st.plotly_chart(fig1, use_container_width=True)
+        
+    with col2:
+        st.write("**평균 조회수 추이**")
+        fig2 = px.line(df, x='Date', y='Avg_Views', markers=True, color_discrete_sequence=['#00CC96'])
+        st.plotly_chart(fig2, use_container_width=True)
+
+    with col3:
+        st.write("**신규 영상 업로드 수**")
+        fig3 = px.bar(df, x='Date', y='New_Clips', color_discrete_sequence=['#636EFA'])
+        st.plotly_chart(fig3, use_container_width=True)
+
+    # --- 그래프 섹션 2: 참여 및 몰입 (댓글, 공유, 좋아요) ---
+    st.subheader("💬 2. 소비자 몰입 및 참여 지표 (Engagement)")
+    col4, col5, col6 = st.columns(3)
+
+    with col4:
+        st.write("**평균 댓글 수**")
+        fig4 = px.line(df, x='Date', y='Avg_Comments', markers=True, color_discrete_sequence=['#AB63FA'])
+        st.plotly_chart(fig4, use_container_width=True)
+
+    with col5:
+        st.write("**평균 공유 수**")
+        fig5 = px.line(df, x='Date', y='Avg_Shares', markers=True, color_discrete_sequence=['#FFA15A'])
+        st.plotly_chart(fig5, use_container_width=True)
+
+    with col6:
+        st.write("**평균 좋아요 수**")
+        fig6 = px.bar(df, x='Date', y='Avg_Likes', color_discrete_sequence=['#EF553B'])
+        st.plotly_chart(fig6, use_container_width=True)
+
+    # --- 그래프 섹션 3: 효율성 분석 (참여 비율) ---
+    st.subheader("📊 3. 콘텐츠 반응 효율 분석")
+    col7, col8 = st.columns(2)
+
+    with col7:
+        st.write("**조회수 대비 댓글 비율 (%)**")
+        fig7 = px.line(df, x='Date', y='Comment_Ratio', markers=True, color_discrete_sequence=['#19D3F3'])
+        st.plotly_chart(fig7, use_container_width=True)
+
+    with col8:
+        st.write("**조회수 대비 좋아요 비율 (%)**")
+        fig8 = px.line(df, x='Date', y='Like_Ratio', markers=True, color_discrete_sequence=['#FECB52'])
+        st.plotly_chart(fig8, use_container_width=True)
+
+except Exception as e:
+    st.warning("데이터 파일(CSV)을 읽어오는 중입니다. 잠시만 기다려주세요!")
+    st.error(f"Error: {e}")
