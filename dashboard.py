@@ -1,72 +1,80 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
+import yfinance as yf
+from datetime import datetime
 
-st.set_page_config(page_title="Good Molecules x 잉글우드랩 분석", layout="wide")
-st.title("🧪 브랜드 인기도 & 투자 선행 지표 정밀 대시보드")
+st.set_page_config(page_title="Good Molecules x 잉글우드랩 통합 분석", layout="wide")
+st.title("📈 브랜드 트렌드 vs 잉글우드랩(950140) 주가 상관관계")
 
 try:
-    # 데이터 로드
+    # 1. 틱톡 데이터 로드
     df = pd.read_csv("tiktok_trends_master.csv")
     df['Date'] = pd.to_datetime(df['Date'])
 
-    # 추가 비율 지표 계산
-    df['Like_Ratio'] = (df['Avg_Likes'] / df['Avg_Views'] * 100).fillna(0)     # 조회수 대비 좋아요 비율
-    df['Comment_Ratio'] = (df['Avg_Comments'] / df['Avg_Views'] * 100).fillna(0) # 조회수 대비 댓글 비율
+    # 2. 잉글우드랩 주가 데이터 로드 (yfinance)
+    # 틱톡 데이터의 시작일부터 오늘까지의 주가를 가져옵니다.
+    start_date = df['Date'].min().strftime('%Y-%m-%d')
+    stock_df = yf.download("950140.KQ", start=start_date)
+    stock_df = stock_df.reset_index()
+    stock_df['Date'] = pd.to_datetime(stock_df['Date'])
+
+    # 3. 데이터 통합 (날짜 기준)
+    merged_df = pd.merge(df, stock_df[['Date', 'Close']], on='Date', how='left')
+    merged_df['Comment_Ratio'] = (merged_df['Avg_Comments'] / merged_df['Avg_Views'] * 100).fillna(0)
 
     # 최신 데이터 추출
-    last_row = df.iloc[-1]
-    prev_row = df.iloc[-2] if len(df) > 1 else last_row
+    last_row = merged_df.iloc[-1]
+    current_price = last_row['Close'] if not pd.isna(last_row['Close']) else "데이터 없음"
 
-    # --- 상단 핵심 지표 (Metrics) ---
-    st.info("💡 잉글우드랩(950140) 주가와 비교 분석을 위한 실시간 지표입니다.")
-    m1, m2, m3, m4, m5 = st.columns(5)
-    m1.metric("종합 Score", f"{last_row['Score']:,}", f"{round(last_row['Score'] - prev_row['Score'], 2)}")
-    m2.metric("평균 조회수", f"{int(last_row['Avg_Views']):,}")
+    # --- 상단 핵심 지표 ---
+    st.info(f"💡 잉글우드랩 현재가: {current_price}원 (종가 기준)")
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("종합 Score", f"{last_row['Score']:,}")
+    m2.metric("댓글 참여율", f"{last_row['Comment_Ratio']:.2f}%")
     m3.metric("평균 댓글수", f"{int(last_row['Avg_Comments']):,}")
-    m4.metric("좋아요 비율", f"{last_row['Like_Ratio']:.2f}%")
-    m5.metric("댓글 참여율", f"{last_row['Comment_Ratio']:.2f}%")
+    m4.metric("평균 공유수", f"{int(last_row['Avg_Shares']):,}")
 
     st.divider()
 
-    # --- 섹션 1: 브랜드 파워 및 확산 (Score & 조회수) ---
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("🔥 종합 브랜드 화력 (Score)")
-        fig1 = px.area(df, x='Date', y='Score', color_discrete_sequence=['#FF4B4B'])
-        st.plotly_chart(fig1, use_container_width=True)
-    with col2:
-        st.subheader("👁️ 평균 조회수 추이")
-        fig2 = px.line(df, x='Date', y='Avg_Views', markers=True, color_discrete_sequence=['#00CC96'])
-        st.plotly_chart(fig2, use_container_width=True)
+    # --- 메인 분석: 주가 vs 틱톡 Score (이중축 그래프) ---
+    st.subheader("🔗 주가 vs 틱톡 종합 화력 (상관관계 분석)")
+    
+    fig_combined = go.Figure()
+    # 틱톡 Score (막대)
+    fig_combined.add_trace(go.Bar(
+        x=merged_df['Date'], y=merged_df['Score'], name="틱톡 Score",
+        marker_color='rgba(255, 75, 75, 0.6)', yaxis='y1'
+    ))
+    # 잉글우드랩 주가 (선)
+    fig_combined.add_trace(go.Scatter(
+        x=merged_df['Date'], y=merged_df['Close'], name="잉글우드랩 주가",
+        line=dict(color='#1f77b4', width=3), yaxis='y2'
+    ))
 
-    # --- 섹션 2: 소비자 참여 (댓글 & 공유 & 좋아요) ---
-    st.subheader("💬 소비자 직접 반응 지표 (Engagement)")
-    col3, col4, col5 = st.columns(3)
-    with col3:
-        st.write("**평균 댓글 수**")
-        fig3 = px.line(df, x='Date', y='Avg_Comments', markers=True, color_discrete_sequence=['#AB63FA'])
-        st.plotly_chart(fig3, use_container_width=True)
-    with col4:
-        st.write("**평균 공유 수**")
-        fig4 = px.bar(df, x='Date', y='Avg_Shares', color_discrete_sequence=['#FFA15A'])
-        st.plotly_chart(fig4, use_container_width=True)
-    with col5:
-        st.write("**평균 좋아요 수**")
-        fig5 = px.line(df, x='Date', y='Avg_Likes', markers=True, color_discrete_sequence=['#EF553B'])
-        st.plotly_chart(fig5, use_container_width=True)
+    fig_combined.update_layout(
+        yaxis=dict(title="틱톡 Score", side="left"),
+        yaxis2=dict(title="주가 (원)", side="right", overlaying="y", showgrid=False),
+        legend=dict(x=0, y=1.1, orientation="h")
+    )
+    st.plotly_chart(fig_combined, use_container_width=True)
 
-    # --- 섹션 3: 효율성 분석 (참여 비율) ---
-    st.subheader("📊 콘텐츠 몰입도 분석 (조회수 대비 비율)")
-    col6, col7 = st.columns(2)
-    with col6:
-        st.write("**조회수 대비 댓글 비율 (%)**")
-        fig6 = px.line(df, x='Date', y='Comment_Ratio', markers=True, color_discrete_sequence=['#19D3F3'])
-        st.plotly_chart(fig6, use_container_width=True)
-    with col7:
+    # --- 세부 지표 섹션 ---
+    st.subheader("💬 세부 참여 지표 추이")
+    c1, c2, c3 = st.columns(3)
+    
+    with c1:
+        st.write("**댓글 참여율 (%)**")
+        st.plotly_chart(px.line(merged_df, x='Date', y='Comment_Ratio', markers=True), use_container_width=True)
+    with c2:
+        st.write("**평균 공유수**")
+        st.plotly_chart(px.bar(merged_df, x='Date', y='Avg_Shares', color_discrete_sequence=['#FFA15A']), use_container_width=True)
+    with c3:
         st.write("**조회수 대비 좋아요 비율 (%)**")
-        fig7 = px.line(df, x='Date', y='Like_Ratio', markers=True, color_discrete_sequence=['#FECB52'])
-        st.plotly_chart(fig7, use_container_width=True)
+        merged_df['Like_Ratio'] = (merged_df['Avg_Likes'] / merged_df['Avg_Views'] * 100).fillna(0)
+        st.plotly_chart(px.line(merged_df, x='Date', y='Like_Ratio', markers=True, color_discrete_sequence=['#FECB52']), use_container_width=True)
 
 except Exception as e:
-    st.warning("데이터 수집 중입니다. 첫 번째 데이터가 저장되면 대시보드가 활성화됩니다.")
+    st.warning("데이터 수집 및 통합 중입니다. 첫 데이터가 생성되면 주가와 함께 표시됩니다.")
+    st.error(f"상세 에러: {e}")
