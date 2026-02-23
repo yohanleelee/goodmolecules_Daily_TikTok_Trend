@@ -14,7 +14,7 @@ def run_and_get_report(keyword="goodmolecules"):
     
     payload = {
         "searchQueries": [keyword],
-        "resultsPerPage": 50,           
+        "resultsPerPage": 10,           
         "searchType": "video",
         "searchDateFilter": "past-24h",
         "searchSort": "latest"
